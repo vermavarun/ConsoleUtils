@@ -1,65 +1,58 @@
-﻿using System;
-
-namespace ConsoleUtils
+﻿namespace ConsoleUtils
 {
-    using Microsoft.WindowsAPICodePack.Shell.PropertySystem;
+    using System;
+    using System.Collections.Generic;
     using System.IO;
     using System.Linq;
     using System.Net;
+    using System.Threading;
     using System.Threading.Tasks;
-    using Microsoft.WindowsAPICodePack.Shell;
-    using Microsoft.WindowsAzure.Storage;
-    using System.Globalization;
+    using System.Timers;
     using ENGIEImpact.ClientDataFeeds.AzureFunctions.Helper;
-    using Microsoft.WindowsAzure.Storage.Auth;
     using Microsoft.WindowsAzure.Storage.Blob;
     using Microsoft.WindowsAzure.Storage.RetryPolicies;
-    
-    class Program
+    using Renci.SshNet;
+    using static System.Net.Mime.MediaTypeNames;
+    using Timer = System.Threading.Timer;
+
+    internal class Program
     {
+
+        #region Fields
+
         private static IBlobContainerHelper blobContainerHelper;
         private static CloudBlobContainer ftpBlobContainer;
-        static void Main(string[] args)
-        {
-         
-             DownloadAndUploadFTPInChunks().Wait();
-        }
 
+        #endregion
 
-      
+        #region Methods
+
+        #region Private Methods
+
         private static async Task<int> DownloadAndUploadFTPInChunks()
         {
-            System.Net.ServicePointManager.Expect100Continue = false;
+            ServicePointManager.Expect100Continue = false;
 
             blobContainerHelper = new BlobContainerHelper();
-            var containerName = "ftpblob";
+            string containerName = "ftpblob";
             ftpBlobContainer =
                 blobContainerHelper.CloudBlobClient.GetContainerReference(containerName);
-            var blobName = "2. Setting up the development environment.mp4";
+            string blobName = "2. Setting up the development environment.mp4";
             ICloudBlob fetchedblob = blobContainerHelper
                 .GetCloudBlobAsync(blobName, ftpBlobContainer).GetAwaiter().GetResult();
-           
 
-
-            // var cloudStorageAccount = CloudStorageAccount.DevelopmentStorageAccount;
-           
-           
-            int segmentSize = 1 * 1024 * 1024;//1 MB chunk
-                                              // var blobContainer = cloudStorageAccount.CreateCloudBlobClient().GetContainerReference(containerName);
-                                              //  var fetchedblob = blobContainer.GetBlockBlobReference(blobName);
-
-                                              string saveFileName = @"D:\"+ blobName;
+            int segmentSize = 1 * 1024 * 1024; //1 MB chunk
 
             long blobLengthRemaining = fetchedblob.Properties.Length;
             long startPosition = 0;
 
             FtpWebRequest request =
-                (FtpWebRequest)WebRequest.Create("ftp://13.66.250.56/"+ blobName);
+                (FtpWebRequest)WebRequest.Create("ftp://13.66.250.56/" + blobName);
             request.Credentials = new NetworkCredential("user1", "user1");
             request.Method = WebRequestMethods.Ftp.UploadFile;
             request.Timeout = int.MaxValue;
             Stream requestStream = request.GetRequestStream();
-            var blobRequestOptions = new BlobRequestOptions
+            BlobRequestOptions blobRequestOptions = new BlobRequestOptions
             {
                 RetryPolicy = new ExponentialRetry(TimeSpan.FromSeconds(60), 10),
                 MaximumExecutionTime = TimeSpan.FromMinutes(60),
@@ -73,36 +66,26 @@ namespace ConsoleUtils
                     byte[] blobContents = new byte[blockSize];
                     using (MemoryStream ms = new MemoryStream())
                     {
-                        await fetchedblob.DownloadRangeToStreamAsync(ms, startPosition, blockSize,null, blobRequestOptions,null);
+                        await fetchedblob.DownloadRangeToStreamAsync(ms, startPosition, blockSize, null,
+                            blobRequestOptions, null);
                         ms.Position = 0;
                         ms.Read(blobContents, 0, blobContents.Length);
-                        ////using (FileStream fs = new FileStream(saveFileName, FileMode.OpenOrCreate))
-                        ////{
-                        ////    fs.Position = startPosition;
-                        ////    fs.Write(blobContents, 0, blobContents.Length);
-                        ////}
 
-                        //Stream ftpStream = request.GetRequestStream();
-                        // ftpStream.Write(blobContents, 0, (int)blockSize);
-
-                        //using (requestStream = request.GetRequestStream())
-                        //{
-                        
                         requestStream.Write(blobContents, 0, (int)blockSize);
-                        //}
                     }
 
                     startPosition += blockSize;
-                    blobLengthRemaining -= blockSize; Console.Clear();
+                    blobLengthRemaining -= blockSize;
+                    Console.Clear();
                     Console.WriteLine($"Remaining bytes : {blobLengthRemaining}");
-                    
                 } while (blobLengthRemaining > 0);
+
                 requestStream.Close();
                 using (FtpWebResponse response = (FtpWebResponse)request.GetResponse())
                 {
                     Console.WriteLine($"Upload File Complete, status {response.StatusDescription}");
-
                 }
+
                 return 1;
             }
             catch (Exception ex)
@@ -111,7 +94,6 @@ namespace ConsoleUtils
             }
             finally
             {
-
                 requestStream.Close();
             }
 
@@ -119,7 +101,145 @@ namespace ConsoleUtils
         }
 
 
+        private static async Task<int> DownloadAndUploadSFTPInChunks()
+        {
+            ServicePointManager.Expect100Continue = false;
+
+            blobContainerHelper = new BlobContainerHelper();
+            string containerName = "ftpblob";
+            ftpBlobContainer =
+                blobContainerHelper.CloudBlobClient.GetContainerReference(containerName);
+            string blobName = "2017-Scrum-Guide-US.pdf";
+            ICloudBlob fetchedblob = blobContainerHelper
+                .GetCloudBlobAsync(blobName, ftpBlobContainer).GetAwaiter().GetResult();
+
+            int segmentSize = 1 * 1024 * 1024; //1 MB chunk
+
+            long blobLengthRemaining = fetchedblob.Properties.Length;
+            long startPosition = 0;
+
+            //FtpWebRequest request = (FtpWebRequest)WebRequest.Create("ftp://13.66.250.56/" + blobName);
+
+            //request.Credentials = new NetworkCredential("user1", "user1");
+            //request.Method = WebRequestMethods.Ftp.UploadFile;
+            //request.Timeout = int.MaxValue;
+
+            var client = new SftpClient("52.183.65.75", 22, "user1", "user1");
+            client.Connect();
+            if (!client.IsConnected)
+            {
+                Console.WriteLine("Not able to connect sftp");
+                return 1;
+            }
+
+            Stream requestStream = client.OpenWrite(blobName); // .GetRequestStream();
+            BlobRequestOptions blobRequestOptions = new BlobRequestOptions
+            {
+                RetryPolicy = new ExponentialRetry(TimeSpan.FromSeconds(60), 10),
+                MaximumExecutionTime = TimeSpan.FromMinutes(60),
+                ServerTimeout = TimeSpan.FromMinutes(60)
+            };
+            try
+            {
+                do
+                {
+                    long blockSize = Math.Min(segmentSize, blobLengthRemaining);
+                    byte[] blobContents = new byte[blockSize];
+                    using (MemoryStream ms = new MemoryStream())
+                    {
+                        await fetchedblob.DownloadRangeToStreamAsync(ms, startPosition, blockSize, null,
+                            blobRequestOptions, null);
+                        ms.Position = 0;
+                        ms.Read(blobContents, 0, blobContents.Length);
+
+                        requestStream.Write(blobContents, 0, (int)blockSize);
+                    }
+
+                    startPosition += blockSize;
+                    blobLengthRemaining -= blockSize;
+                    Console.Clear();
+                    Console.WriteLine($"Remaining bytes : {blobLengthRemaining}");
+                } while (blobLengthRemaining > 0);
+
+                requestStream.Close();
+                //using (FtpWebResponse response = (FtpWebResponse)request.GetResponse())
+                //{
+                //    Console.WriteLine($"Upload File Complete, status {response.StatusDescription}");
+                //}
 
 
+
+                return 1;
+            }
+            catch (Exception ex)
+            {
+                client.Disconnect();
+                client.Dispose();
+                Console.WriteLine("Error");
+            }
+            finally
+            {
+                client.Disconnect();
+                client.Dispose();
+                requestStream.Close();
+            }
+
+            return 1;
+        }
+
+        private static void Main(string[] args)
+        {
+            //DownloadAndUploadFTPInChunks().Wait();
+            //DownloadAndUploadSFTPInChunks().Wait();
+            UploadFileInBlobInChunksAsync().Wait();
+
+        }
+
+        private static async Task<int> UploadFileInBlobInChunksAsync()
+        {
+            blobContainerHelper = new BlobContainerHelper();
+            string containerName = "ftpblob";
+            ftpBlobContainer =
+              blobContainerHelper.CloudBlobClient.GetContainerReference(containerName);
+            string blobName = "koinaam.txt";
+            //ICloudBlob fetchedblob = blobContainerHelper
+            //    .GetCloudBlobAsync(blobName, ftpBlobContainer).GetAwaiter().GetResult();
+
+            CloudAppendBlob blob = ftpBlobContainer.GetAppendBlobReference(blobName);
+
+            bool ifexsist = await blob.ExistsAsync();
+           
+          
+
+            List<string> mylist;
+            for (int i = 0; i <= 100; i++)
+            {
+                if (ifexsist)
+                {
+
+                    mylist = new List<string>(new string[] { "element" + i, "element" + i, "element" + i });
+                    var result = String.Join(", ", mylist.ToArray()) + Environment.NewLine;
+
+                    //byte[] dataAsBytes = mylist
+                    //      .SelectMany(s => System.Text.Encoding.ASCII.GetBytes(s))
+                    //      .ToArray();
+
+                    byte[] dataAsBytes = System.Text.Encoding.ASCII.GetBytes(result);
+                    await blob.AppendFromByteArrayAsync(dataAsBytes, 0, dataAsBytes.Length);
+                }
+                else
+                {
+                    await blob.CreateOrReplaceAsync();
+                    ifexsist = true;
+                }
+
+              
+            }
+            return 1;
+        }
+
+        #endregion
+
+        #endregion
     }
 }
